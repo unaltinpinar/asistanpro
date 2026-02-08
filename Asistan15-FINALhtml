@@ -41,6 +41,9 @@
     .student-chip { padding:8px 12px; border-radius:12px; font-weight:700; display:inline-flex; gap:8px; align-items:center; }
     .student-chip .name { font-size:13px; }
     .student-chip .award { font-size:12px; padding:6px 8px; border-radius:8px; cursor:pointer; }
+.exam-points-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 800; margin-left: 6px; }
+.improvement-badge { background: linear-gradient(90deg, #10b981, #34d399); color: white; }
+.rank-badge { background: linear-gradient(90deg, #f59e0b, #fbbf24); color: white; }
 
     .level-badge { display:inline-flex; align-items:center; gap:6px; padding:6px 8px; border-radius:999px; font-weight:800; font-size:12px; background: linear-gradient(90deg,#eef2ff,#fff); color:#334155; border:1px solid rgba(99,102,241,0.08); }
     .level-progress-mini { height:8px; width:140px; background:#eef2ff; border-radius:999px; overflow:hidden; }
@@ -138,6 +141,72 @@
         tones.forEach(({freq, dur, type, vol, delay=0}) => {
           const o = ctx.createOscillator();
           const g = ctx.createGain();
+// ===================== EXAM POINTS CALCULATOR =====================
+// İlk 10'a sıralama puanı: 1.→10p, 2.→9p, ... 10.→1p
+// %20 gelişim bonusu: Önceki denemeden %20+ artış gösterene +5p
+const calculateExamPoints = (examId, exam, allStudents, allExams) => {
+  const pointsAwarded = [];
+  
+  // 1. NET SONUÇLARINI TOPLA
+  const studentNets = allStudents
+    .map(s => ({
+      id: s.id,
+      name: s.name,
+      net: Number(exam.results?.[s.id]?.net || 0),
+      previousNet: getPreviousExamNet(s.id, examId, allExams)
+    }))
+    .filter(s => s.net > 0); // Sadece sınava girenler
+
+  if (studentNets.length === 0) return pointsAwarded;
+
+  // 2. SIRALAMA PUANI (İlk 10'a)
+  const sorted = [...studentNets].sort((a, b) => b.net - a.net);
+  sorted.forEach((s, index) => {
+    if (index < 10) {
+      const rankPoints = 10 - index; // 1. → 10p, 2. → 9p ...
+      pointsAwarded.push({
+        studentId: s.id,
+        studentName: s.name,
+        type: 'rank',
+        points: rankPoints,
+        rank: index + 1,
+        reason: `🏆 ${index + 1}. sıra (${s.net.toFixed(1)} net)`
+      });
+    }
+  });
+
+  // 3. GELİŞİM BONUSU (%20+ artış)
+  studentNets.forEach(s => {
+    if (s.previousNet && s.previousNet > 0) {
+      const improvementPercent = ((s.net - s.previousNet) / s.previousNet) * 100;
+      if (improvementPercent >= 20) {
+        pointsAwarded.push({
+          studentId: s.id,
+          studentName: s.name,
+          type: 'improvement',
+          points: 5,
+          improvementPercent: improvementPercent.toFixed(1),
+          reason: `📈 %${improvementPercent.toFixed(0)} gelişim (+${(s.net - s.previousNet).toFixed(1)} net)`
+        });
+      }
+    }
+  });
+
+  return pointsAwarded;
+};
+
+// Önceki sınavdaki neti bul
+const getPreviousExamNet = (studentId, currentExamId, allExams) => {
+  const currentIndex = allExams.findIndex(e => e.id === currentExamId);
+  if (currentIndex <= 0) return null; // İlk sınav
+  
+  // Önceki sınavları tara (en yakından başla)
+  for (let i = currentIndex - 1; i >= 0; i--) {
+    const prevNet = Number(allExams[i].results?.[studentId]?.net || 0);
+    if (prevNet > 0) return prevNet;
+  }
+  return null;
+};
           o.type = type || 'sine';
           o.frequency.setValueAtTime(freq, t0 + delay);
           g.gain.setValueAtTime(vol || 0.06, t0 + delay);
@@ -780,22 +849,95 @@
         } 
       };
       
-      const handleUpdateResult = (examId,stdId,field,rawVal) => {
-        const value = Math.max(0, Math.floor(Number(rawVal)||0));
-        onSaveExams(exams.map(e=>{ 
-          if(e.id===examId){ 
-            const qCount=Number(e.qCount)||0; 
-            const prev=e.results?.[stdId]||{d:0,y:0,net:0}; 
-            const newD=field==='d'?value:prev.d; 
-            const newY=field==='y'?value:prev.y; 
-            if(newD+newY>qCount){ alert(`Geçersiz giriş: Doğru+Yanlış toplamı (${newD+newY}) soru sayısını (${qCount}) aşıyor.`); return e; } 
-            const net=Math.max(0,newD-(newY/3)); 
-            return {...e,results:{...e.results,[stdId]:{d:newD,y:newY,net}} } 
-          } 
-          return e; 
-        }));
-      };
+    const handleUpdateResult = (examId, stdId, field, rawVal) => {
+  const value = Math.max(0, Math.floor(Number(rawVal) || 0));
+  
+  const updatedExams = exams.map(e => {
+    if (e.id === examId) {
+      const qCount = Number(e.qCount) || 0;
+      const prev = e.results?.[stdId] || { d: 0, y: 0, net: 0 };
+      const newD = field === 'd' ? value : prev.d;
+      const newY = field === 'y' ? value : prev.y;
       
+      if (newD + newY > qCount) {
+        alert(`Geçersiz giriş: Doğru+Yanlış toplamı (${newD + newY}) soru sayısını (${qCount}) aşıyor.`);
+        return e;
+      }
+      
+      const net = Math.max(0, newD - (newY / 3));
+      return { ...e, results: { ...e.results, [stdId]: { d: newD, y: newY, net } } };
+    }
+    return e;
+  });
+
+  onSaveExams(updatedExams);
+
+  // ✅ PUAN HESAPLAMA - Tüm öğrencilerin netlerini girdikten sonra
+  const currentExam = updatedExams.find(e => e.id === examId);
+  if (currentExam) {
+    const pointsToAward = calculateExamPoints(examId, currentExam, students, updatedExams);
+    
+    // Puanları öğrencilere ekle
+    if (pointsToAward.length > 0) {
+      applyExamPoints(examId, pointsToAward);
+const showToast = (message) => {
+  const toast = document.createElement('div');
+  toast.className = 'toast-notice';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+};
+    }
+  }
+};
+ const applyExamPoints = (examId, pointsToAward) => {
+
+  const updatedStudents = students.map(s => {
+    const studentPoints = pointsToAward.filter(p => p.studentId === s.id);
+    if (studentPoints.length === 0) return s;
+
+    // Bu sınavdan daha önce puan aldı mı kontrol et
+    const examHistory = s.examPointHistory || [];
+    const alreadyAwarded = examHistory.find(h => h.examId === examId);
+    if (alreadyAwarded) return s; // Tekrar puan verme
+
+    // Toplam puanı hesapla
+    const totalPoints = studentPoints.reduce((sum, p) => sum + p.points, 0);
+    const reasons = studentPoints.map(p => p.reason).join(', ');
+
+    // Yeni log ekle
+    const newLog = {
+      date: new Date().toISOString(),
+      reason: `📝 Sınav: ${reasons}`,
+      amount: totalPoints,
+      currentTotal: (s.puan || 0) + totalPoints,
+      type: 'EXAM'
+    };
+
+    return {
+      ...s,
+      puan: (s.puan || 0) + totalPoints,
+      logs: [...(s.logs || []), newLog],
+      examPointHistory: [...examHistory, { examId, points: totalPoints, date: new Date().toISOString() }]
+    };
+  });
+
+  setStudents(updatedStudents);
+  storage.setItem(`class_${selClass.id}_students`, updatedStudents);
+
+  // Bildirim göster
+  const summary = pointsToAward
+    .reduce((acc, p) => {
+      if (!acc[p.studentId]) acc[p.studentId] = { name: p.studentName, total: 0, reasons: [] };
+      acc[p.studentId].total += p.points;
+      acc[p.studentId].reasons.push(p.reason);
+      return acc;
+    }, {});
+
+  Object.values(summary).forEach(s => {
+    showToast(`${s.name}: +${s.total}P (${s.reasons.join(', ')})`);
+  });
+};     
       return (
         <div className="bg-white rounded-3xl p-10 shadow-2xl">
           <div className="flex justify-between items-center mb-8 border-b pb-4">
@@ -842,131 +984,122 @@
       );
     };
 
-    // ==================== NAME SCROLLER (KURA) - ADİL VERSİYON ====================
-function NameScroller({ students, drawnStudents, onDraw, onReset, onAddLog, onRemoveStudent, onUpdateStudent }) {
-  const [isRunning, setIsRunning] = useState(false);
-  const [displayName, setDisplayName] = useState('');
-  const [highlightedId, setHighlightedId] = useState(null);
-  const tickIntervalRef = useRef(null);
+    // ==================== NAME SCROLLER (KURA) ====================
+    function NameScroller({ students, drawnStudents, onDraw, onReset, onAddLog, onRemoveStudent }) {
+      const [isRunning, setIsRunning] = useState(false);
+      const [displayName, setDisplayName] = useState('');
+      const [highlightedId, setHighlightedId] = useState(null);
 
-  const drawnSafe = Array.isArray(drawnStudents) ? drawnStudents : [];
+      const drawnSafe = Array.isArray(drawnStudents) ? drawnStudents : [];
+      const available = Array.isArray(students) ? students.filter(s => !drawnSafe.includes(s.id)) : [];
 
-  // 1. ADİL ADAYLARI BELİRLEME MANTIĞI
-  const getAdilAdaylar = () => {
-    if (!students || students.length === 0) return [];
-    const currentMonth = new Date().getMonth();
-    
-    // Henüz çekilmemiş olanlar
-    let candidates = students.filter(s => !drawnSafe.includes(s.id));
-    if (candidates.length === 0) return [];
+      const tickIntervalRef = useRef(null);
 
-    // En az kalkma sayısını bul (Adalet burada sağlanıyor)
-    const minKalkma = Math.min(...candidates.map(s => s.kalkmaSayisi || 0));
-    return candidates.filter(s => (s.kalkmaSayisi || 0) === minKalkma);
-  };
+      const startDraw = () => {
+        if (available.length === 0) { alert('Çekilebilecek öğrenci yok.'); return; }
+        ensureAudioResume();
+        setIsRunning(true);
+        setHighlightedId(null);
+        playSpinStart();
 
-  const available = getAdilAdaylar();
+        const totalTime = 4000;
+        tickIntervalRef.current = setInterval(() => {
+          playTickSound();
+          const pick = available[Math.floor(Math.random() * available.length)];
+          setDisplayName(pick.name);
+        }, 70);
 
-  const startDraw = () => {
-    if (available.length === 0) { alert('Çekilebilecek öğrenci yok.'); return; }
-    ensureAudioResume();
-    setIsRunning(true);
-    setHighlightedId(null);
-    playSpinStart();
+        setTimeout(() => {
+          if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
+          const selected = available[Math.floor(Math.random() * available.length)];
+          setDisplayName(selected.name);
+          setHighlightedId(selected.id);
+          try {
+            if (typeof onDraw === 'function') onDraw(selected.id);
+          } catch (e) {
+            console.error('onDraw error', e);
+          }
+          playFinalSound();
+          setIsRunning(false);
+        }, totalTime);
+      };
 
-    const totalTime = 4000;
-    tickIntervalRef.current = setInterval(() => {
-      playTickSound();
-      const pick = available[Math.floor(Math.random() * available.length)];
-      setDisplayName(pick.name);
-    }, 70);
+      const handleAward = (amount) => {
+        if (!highlightedId) return;
+        onAddLog && onAddLog(highlightedId, 'KURA', amount, 'Kura Ödülü');
+        playPointSound(amount);
+      };
 
-    setTimeout(() => {
-      if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
-      
-      const selected = available[Math.floor(Math.random() * available.length)];
-      setDisplayName(selected.name);
-      setHighlightedId(selected.id);
+      const handleReset = () => {
+        try {
+          if (typeof onReset === 'function') onReset();
+        } catch (e) {
+          console.error('onReset threw', e);
+        }
+        try { setDisplayName(''); } catch {}
+        try { setHighlightedId(null); } catch {}
+      };
 
-      // 2. VERİYİ GÜNCELLE (Kura sayısını artır ve ayı kaydet)
-      if (typeof onUpdateStudent === 'function') {
-        onUpdateStudent(selected.id, { 
-          kalkmaSayisi: (selected.kalkmaSayisi || 0) + 1,
-          lastKuraMonth: new Date().getMonth()
-        });
-      }
+      return (
+        <div className="bg-slate-900 rounded-3xl p-8 text-center shadow-2xl min-h-[560px] flex flex-col items-center gap-6 relative">
+          <div className="text-indigo-300 font-bold uppercase mb-1 flex items-center gap-2"><Sparkles className="w-5 h-5" /> Şans (İsim Kaydırma)</div>
 
-      try { if (typeof onDraw === 'function') onDraw(selected.id); } catch (e) { console.error(e); }
-      playFinalSound();
-      setIsRunning(false);
-    }, totalTime);
-  };
-
-  const handleAward = (amount) => {
-    if (!highlightedId) return;
-    onAddLog && onAddLog(highlightedId, 'KURA', amount, 'Kura Ödülü');
-    playPointSound(amount);
-  };
-
-  const handleReset = () => {
-    if (typeof onReset === 'function') onReset();
-    setDisplayName('');
-    setHighlightedId(null);
-  };
-
-  // ANA GÖRSEL RETURN (BURASI DEĞİŞMEDİ, SADECE MANTIK EKLENDİ)
-  return (
-    <div className="bg-slate-900 rounded-3xl p-8 text-center shadow-2xl min-h-[560px] flex flex-col items-center gap-6 relative">
-      <div className="text-indigo-300 font-bold uppercase mb-1 flex items-center gap-2"><Sparkles className="w-5 h-5" /> Şans (İsim Kaydırma)</div>
-      <div className="scroller-wrap">
-        <div className="scroller-window">
-          <div className="name-wrapper">
-            {displayName ? (
-              <div className={`name-item ${highlightedId ? 'active' : 'dim'}`} style={{ background: highlightedId ? 'linear-gradient(90deg,#06b6d4,#6366f1)' : 'transparent', color: highlightedId ? '#fff' : undefined }}>
-                {displayName}
+          <div className="scroller-wrap">
+            <div className="scroller-window">
+              <div className="name-wrapper">
+                {displayName ? (
+                  <div className={`name-item ${highlightedId ? 'active' : 'dim'}`} style={{ background: highlightedId ? 'linear-gradient(90deg,#06b6d4,#6366f1)' : 'transparent', color: highlightedId ? '#fff' : undefined }}>
+                    {displayName}
+                  </div>
+                ) : (
+                  <div className="name-item dim">Hazır Bekliyor</div>
+                )}
               </div>
-            ) : (
-              <div className="name-item dim">Hazır Bekliyor</div>
-            )}
-          </div>
-        </div>
-        <div className="mt-4 flex gap-3 items-center justify-center">
-          <button onClick={startDraw} disabled={isRunning || available.length===0} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-2xl font-extrabold text-lg disabled:opacity-60 disabled:cursor-not-allowed">ÇEK!</button>
-          <button onClick={handleReset} className="bg-slate-800 text-white px-4 py-3 rounded-2xl font-bold">Sıfırla</button>
-        </div>
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white p-3 rounded-2xl shadow">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-xs text-slate-400">Adil Adaylar (En Az Kalkanlar)</div>
-              <div className="text-xs text-slate-500">{available.length} Kişi</div>
             </div>
-            <div className="flex flex-wrap gap-2 max-h-36 overflow-auto">
-              {available.map(s => (<div key={s.id} className="flex items-center gap-2 bg-indigo-50 px-2 py-1 rounded-full text-xs font-bold"><span>{s.name} ({s.kalkmaSayisi || 0})</span></div>))}
+
+            <div className="mt-4 flex gap-3 items-center justify-center">
+              <button onClick={startDraw} disabled={isRunning || available.length===0} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-2xl font-extrabold text-lg disabled:opacity-60 disabled:cursor-not-allowed">ÇEK!</button>
+              <button onClick={handleReset} className="bg-slate-800 text-white px-4 py-3 rounded-2xl font-bold">Sıfırla</button>
             </div>
-          </div>
-          <div className="bg-white p-3 rounded-2xl shadow text-center">
-            <div className="text-xs text-slate-400 mb-2">Son Çekilen / İşlemler</div>
-            {highlightedId ? (
-              <>
-                <div className="text-2xl font-extrabold text-indigo-700 mb-3">{displayName}</div>
-                <div className="flex gap-2 justify-center flex-wrap">
-                  {Array.from({length:11}).map((_, idx) => {
-                    const v = idx - 5;
-                    return (
-                      <button key={v} onClick={() => handleAward(v)} className={`w-12 h-12 ${v > 0 ? 'bg-emerald-500' : (v<0 ? 'bg-rose-500' : 'bg-indigo-500')} text-white rounded-xl font-extrabold text-lg shadow hover:scale-105 transition-transform`}>
-                        {v > 0 ? `+${v}` : v}
-                      </button>
-                    );
-                  })}
+
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-white p-3 rounded-2xl shadow">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-slate-400">Çekilebilecek Öğrenciler</div>
+                  <div className="text-xs text-slate-500">{available.length} / {Array.isArray(students) ? students.length : 0}</div>
                 </div>
-              </>
-            ) : (<div className="text-sm text-slate-500">Henüz seçim yok</div>)}
+                <div className="flex flex-wrap gap-2 max-h-36 overflow-auto">
+                  {available.map(s => (<div key={s.id} className="flex items-center gap-2 bg-indigo-50 px-2 py-1 rounded-full text-xs font-bold"><span>{s.name}</span></div>))}
+                  {available.length===0 && <div className="text-xs text-slate-400">Yok</div>}
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-2xl shadow text-center">
+                <div className="text-xs text-slate-400 mb-2">Son Çekilen / İşlemler</div>
+                {highlightedId ? (
+                  <>
+                    <div className="text-2xl font-extrabold text-indigo-700 mb-3">{displayName}</div>
+                    <div className="flex gap-2 justify-center flex-wrap">
+                      {Array.from({length:11}).map((_, idx) => {
+                        const v = idx - 5;
+                        const isPos = v > 0;
+                        return (
+                          <button key={v} onClick={() => handleAward(v)} className={`w-12 h-12 ${isPos ? 'bg-emerald-500' : (v<0 ? 'bg-rose-500' : 'bg-indigo-500')} text-white rounded-xl font-extrabold text-lg shadow hover:scale-105 transition-transform`}>
+                            {v > 0 ? `+${v}` : v}
+                          </button>
+                        );
+                      })}
+                      <button onClick={() => { if (confirm('Öğrenciyi listeden silmek istiyor musunuz?')) { onRemoveStudent && onRemoveStudent(highlightedId); setHighlightedId(null); setDisplayName(''); } }} className="w-14 h-12 bg-slate-300 text-slate-800 rounded-xl font-bold">Sil</button>
+                    </div>
+                  </>
+                ) : (<div className="text-sm text-slate-500">Henüz seçim yok</div>)}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
+      );
+    }
+
     // ==================== STATS PAGE ====================
     const StatsPage = ({ students, exams, onShowDetail }) => {
       const calcAvg = (std) => {
@@ -1674,15 +1807,8 @@ function NameScroller({ students, drawnStudents, onDraw, onReset, onAddLog, onRe
 
                   {page==='hw' && <HomeworkManager students={students} homeworks={homeworks} onSaveHomeworks={saveHomeworks} onAddLog={addLog} />}
 
-              <NameScroller 
-  students={filteredStudents} 
-  drawnStudents={drawnIds} 
-  onDraw={handleDraw} 
-  onReset={() => setDrawnIds([])}
-  onAddLog={addLog}
-  onRemoveStudent={removeStudent}
-  onUpdateStudent={updateStudent}  // <--- BU SATIRI EKLEMELİSİNİZ
-/>
+                  {page==='wheel' && <NameScroller students={students} drawnStudents={drawnStudents} onDraw={(id)=>{ setDrawnStudents(prev=>[...prev, id]); handleWheelSelected(id); }} onReset={()=>setDrawnStudents([])} onAddLog={addLog} onRemoveStudent={handleRemoveStudent} />}
+
                   {page==='exam' && <ExamManager students={students} exams={exams} onSaveExams={saveExams} onStartExamTimer={startExamTimer} />}
 
                   {page==='stats' && <StatsPage students={students} exams={exams} onShowDetail={setDetailStudent} />}
