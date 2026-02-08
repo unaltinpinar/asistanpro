@@ -120,8 +120,8 @@
     function avatarForLevel(level) {
       if (level <= 2) return '🥚';
       if (level <= 5) return '🐥';
-      if (level <= 15) return '🐔';
-      if (level <= 25) return '🛡️';
+      if (level <= 10) return '🐔';
+      if (level <= 20) return '🛡️';
       return '🐉';
     }
 
@@ -842,122 +842,131 @@
       );
     };
 
-    // ==================== NAME SCROLLER (KURA) ====================
-    function NameScroller({ students, drawnStudents, onDraw, onReset, onAddLog, onRemoveStudent }) {
-      const [isRunning, setIsRunning] = useState(false);
-      const [displayName, setDisplayName] = useState('');
-      const [highlightedId, setHighlightedId] = useState(null);
+    // ==================== NAME SCROLLER (KURA) - ADİL VERSİYON ====================
+function NameScroller({ students, drawnStudents, onDraw, onReset, onAddLog, onRemoveStudent, onUpdateStudent }) {
+  const [isRunning, setIsRunning] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [highlightedId, setHighlightedId] = useState(null);
+  const tickIntervalRef = useRef(null);
 
-      const drawnSafe = Array.isArray(drawnStudents) ? drawnStudents : [];
-      const available = Array.isArray(students) ? students.filter(s => !drawnSafe.includes(s.id)) : [];
+  const drawnSafe = Array.isArray(drawnStudents) ? drawnStudents : [];
 
-      const tickIntervalRef = useRef(null);
+  // 1. ADİL ADAYLARI BELİRLEME MANTIĞI
+  const getAdilAdaylar = () => {
+    if (!students || students.length === 0) return [];
+    const currentMonth = new Date().getMonth();
+    
+    // Henüz çekilmemiş olanlar
+    let candidates = students.filter(s => !drawnSafe.includes(s.id));
+    if (candidates.length === 0) return [];
 
-      const startDraw = () => {
-        if (available.length === 0) { alert('Çekilebilecek öğrenci yok.'); return; }
-        ensureAudioResume();
-        setIsRunning(true);
-        setHighlightedId(null);
-        playSpinStart();
+    // En az kalkma sayısını bul (Adalet burada sağlanıyor)
+    const minKalkma = Math.min(...candidates.map(s => s.kalkmaSayisi || 0));
+    return candidates.filter(s => (s.kalkmaSayisi || 0) === minKalkma);
+  };
 
-        const totalTime = 4000;
-        tickIntervalRef.current = setInterval(() => {
-          playTickSound();
-          const pick = available[Math.floor(Math.random() * available.length)];
-          setDisplayName(pick.name);
-        }, 70);
+  const available = getAdilAdaylar();
 
-        setTimeout(() => {
-          if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
-          const selected = available[Math.floor(Math.random() * available.length)];
-          setDisplayName(selected.name);
-          setHighlightedId(selected.id);
-          try {
-            if (typeof onDraw === 'function') onDraw(selected.id);
-          } catch (e) {
-            console.error('onDraw error', e);
-          }
-          playFinalSound();
-          setIsRunning(false);
-        }, totalTime);
-      };
+  const startDraw = () => {
+    if (available.length === 0) { alert('Çekilebilecek öğrenci yok.'); return; }
+    ensureAudioResume();
+    setIsRunning(true);
+    setHighlightedId(null);
+    playSpinStart();
 
-      const handleAward = (amount) => {
-        if (!highlightedId) return;
-        onAddLog && onAddLog(highlightedId, 'KURA', amount, 'Kura Ödülü');
-        playPointSound(amount);
-      };
+    const totalTime = 4000;
+    tickIntervalRef.current = setInterval(() => {
+      playTickSound();
+      const pick = available[Math.floor(Math.random() * available.length)];
+      setDisplayName(pick.name);
+    }, 70);
 
-      const handleReset = () => {
-        try {
-          if (typeof onReset === 'function') onReset();
-        } catch (e) {
-          console.error('onReset threw', e);
-        }
-        try { setDisplayName(''); } catch {}
-        try { setHighlightedId(null); } catch {}
-      };
+    setTimeout(() => {
+      if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
+      
+      const selected = available[Math.floor(Math.random() * available.length)];
+      setDisplayName(selected.name);
+      setHighlightedId(selected.id);
 
-      return (
-        <div className="bg-slate-900 rounded-3xl p-8 text-center shadow-2xl min-h-[560px] flex flex-col items-center gap-6 relative">
-          <div className="text-indigo-300 font-bold uppercase mb-1 flex items-center gap-2"><Sparkles className="w-5 h-5" /> Şans (İsim Kaydırma)</div>
+      // 2. VERİYİ GÜNCELLE (Kura sayısını artır ve ayı kaydet)
+      if (typeof onUpdateStudent === 'function') {
+        onUpdateStudent(selected.id, { 
+          kalkmaSayisi: (selected.kalkmaSayisi || 0) + 1,
+          lastKuraMonth: new Date().getMonth()
+        });
+      }
 
-          <div className="scroller-wrap">
-            <div className="scroller-window">
-              <div className="name-wrapper">
-                {displayName ? (
-                  <div className={`name-item ${highlightedId ? 'active' : 'dim'}`} style={{ background: highlightedId ? 'linear-gradient(90deg,#06b6d4,#6366f1)' : 'transparent', color: highlightedId ? '#fff' : undefined }}>
-                    {displayName}
-                  </div>
-                ) : (
-                  <div className="name-item dim">Hazır Bekliyor</div>
-                )}
+      try { if (typeof onDraw === 'function') onDraw(selected.id); } catch (e) { console.error(e); }
+      playFinalSound();
+      setIsRunning(false);
+    }, totalTime);
+  };
+
+  const handleAward = (amount) => {
+    if (!highlightedId) return;
+    onAddLog && onAddLog(highlightedId, 'KURA', amount, 'Kura Ödülü');
+    playPointSound(amount);
+  };
+
+  const handleReset = () => {
+    if (typeof onReset === 'function') onReset();
+    setDisplayName('');
+    setHighlightedId(null);
+  };
+
+  // ANA GÖRSEL RETURN (BURASI DEĞİŞMEDİ, SADECE MANTIK EKLENDİ)
+  return (
+    <div className="bg-slate-900 rounded-3xl p-8 text-center shadow-2xl min-h-[560px] flex flex-col items-center gap-6 relative">
+      <div className="text-indigo-300 font-bold uppercase mb-1 flex items-center gap-2"><Sparkles className="w-5 h-5" /> Şans (İsim Kaydırma)</div>
+      <div className="scroller-wrap">
+        <div className="scroller-window">
+          <div className="name-wrapper">
+            {displayName ? (
+              <div className={`name-item ${highlightedId ? 'active' : 'dim'}`} style={{ background: highlightedId ? 'linear-gradient(90deg,#06b6d4,#6366f1)' : 'transparent', color: highlightedId ? '#fff' : undefined }}>
+                {displayName}
               </div>
-            </div>
-
-            <div className="mt-4 flex gap-3 items-center justify-center">
-              <button onClick={startDraw} disabled={isRunning || available.length===0} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-2xl font-extrabold text-lg disabled:opacity-60 disabled:cursor-not-allowed">ÇEK!</button>
-              <button onClick={handleReset} className="bg-slate-800 text-white px-4 py-3 rounded-2xl font-bold">Sıfırla</button>
-            </div>
-
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-white p-3 rounded-2xl shadow">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-slate-400">Çekilebilecek Öğrenciler</div>
-                  <div className="text-xs text-slate-500">{available.length} / {Array.isArray(students) ? students.length : 0}</div>
-                </div>
-                <div className="flex flex-wrap gap-2 max-h-36 overflow-auto">
-                  {available.map(s => (<div key={s.id} className="flex items-center gap-2 bg-indigo-50 px-2 py-1 rounded-full text-xs font-bold"><span>{s.name}</span></div>))}
-                  {available.length===0 && <div className="text-xs text-slate-400">Yok</div>}
-                </div>
-              </div>
-
-              <div className="bg-white p-3 rounded-2xl shadow text-center">
-                <div className="text-xs text-slate-400 mb-2">Son Çekilen / İşlemler</div>
-                {highlightedId ? (
-                  <>
-                    <div className="text-2xl font-extrabold text-indigo-700 mb-3">{displayName}</div>
-                    <div className="flex gap-2 justify-center flex-wrap">
-                      {Array.from({length:11}).map((_, idx) => {
-                        const v = idx - 5;
-                        const isPos = v > 0;
-                        return (
-                          <button key={v} onClick={() => handleAward(v)} className={`w-12 h-12 ${isPos ? 'bg-emerald-500' : (v<0 ? 'bg-rose-500' : 'bg-indigo-500')} text-white rounded-xl font-extrabold text-lg shadow hover:scale-105 transition-transform`}>
-                            {v > 0 ? `+${v}` : v}
-                          </button>
-                        );
-                      })}
-                      <button onClick={() => { if (confirm('Öğrenciyi listeden silmek istiyor musunuz?')) { onRemoveStudent && onRemoveStudent(highlightedId); setHighlightedId(null); setDisplayName(''); } }} className="w-14 h-12 bg-slate-300 text-slate-800 rounded-xl font-bold">Sil</button>
-                    </div>
-                  </>
-                ) : (<div className="text-sm text-slate-500">Henüz seçim yok</div>)}
-              </div>
-            </div>
+            ) : (
+              <div className="name-item dim">Hazır Bekliyor</div>
+            )}
           </div>
         </div>
-      );
-    }
-
+        <div className="mt-4 flex gap-3 items-center justify-center">
+          <button onClick={startDraw} disabled={isRunning || available.length===0} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-2xl font-extrabold text-lg disabled:opacity-60 disabled:cursor-not-allowed">ÇEK!</button>
+          <button onClick={handleReset} className="bg-slate-800 text-white px-4 py-3 rounded-2xl font-bold">Sıfırla</button>
+        </div>
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white p-3 rounded-2xl shadow">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-slate-400">Adil Adaylar (En Az Kalkanlar)</div>
+              <div className="text-xs text-slate-500">{available.length} Kişi</div>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-36 overflow-auto">
+              {available.map(s => (<div key={s.id} className="flex items-center gap-2 bg-indigo-50 px-2 py-1 rounded-full text-xs font-bold"><span>{s.name} ({s.kalkmaSayisi || 0})</span></div>))}
+            </div>
+          </div>
+          <div className="bg-white p-3 rounded-2xl shadow text-center">
+            <div className="text-xs text-slate-400 mb-2">Son Çekilen / İşlemler</div>
+            {highlightedId ? (
+              <>
+                <div className="text-2xl font-extrabold text-indigo-700 mb-3">{displayName}</div>
+                <div className="flex gap-2 justify-center flex-wrap">
+                  {Array.from({length:11}).map((_, idx) => {
+                    const v = idx - 5;
+                    return (
+                      <button key={v} onClick={() => handleAward(v)} className={`w-12 h-12 ${v > 0 ? 'bg-emerald-500' : (v<0 ? 'bg-rose-500' : 'bg-indigo-500')} text-white rounded-xl font-extrabold text-lg shadow hover:scale-105 transition-transform`}>
+                        {v > 0 ? `+${v}` : v}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (<div className="text-sm text-slate-500">Henüz seçim yok</div>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
     // ==================== STATS PAGE ====================
     const StatsPage = ({ students, exams, onShowDetail }) => {
       const calcAvg = (std) => {
