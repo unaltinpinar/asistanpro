@@ -1674,8 +1674,15 @@ function NameScroller({ students, drawnStudents, onDraw, onReset, onAddLog, onRe
 
                   {page==='hw' && <HomeworkManager students={students} homeworks={homeworks} onSaveHomeworks={saveHomeworks} onAddLog={addLog} />}
 
-                  {page==='wheel' && <NameScroller students={students} drawnStudents={drawnStudents} onDraw={(id)=>{ setDrawnStudents(prev=>[...prev, id]); handleWheelSelected(id); }} onReset={()=>setDrawnStudents([])} onAddLog={addLog} onRemoveStudent={handleRemoveStudent} />}
-
+              <NameScroller 
+  students={filteredStudents} 
+  drawnStudents={drawnIds} 
+  onDraw={handleDraw} 
+  onReset={() => setDrawnIds([])}
+  onAddLog={addLog}
+  onRemoveStudent={removeStudent}
+  onUpdateStudent={updateStudent}  // <--- BU SATIRI EKLEMELİSİNİZ
+/>
                   {page==='exam' && <ExamManager students={students} exams={exams} onSaveExams={saveExams} onStartExamTimer={startExamTimer} />}
 
                   {page==='stats' && <StatsPage students={students} exams={exams} onShowDetail={setDetailStudent} />}
